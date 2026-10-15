@@ -17,12 +17,22 @@ spec:
   clusterResourceWhitelist:
     - group: ""
       kind: Namespace
-  # Prod freeze / time windows: add Argo CD sync windows here, e.g.
-  #   syncWindows:
-  #     - kind: deny
-  #       description: "hold: <reason>"
-  #       schedule: "* * * * *"   # with duration 1h this is always active (an ad-hoc freeze)
-  #       duration: 1h
-  #       applications: ["*-prod"]
-  #       manualSync: true        # Kargo Promote by a person still goes through
-  # Kargo commits during a deny window, then its argocd-update step waits (up to 72h) for Argo CD.
+  # Deploy windows, per app (<service>-<env>; use exact names: "argo-poc-*" would also match argo-poc-api-*).
+  # Outside a window Kargo still commits, then its argocd-update step waits (up to 72h) for Argo CD.
+  # manualSync: true lets a person's Promote in the Kargo UI through; auto-promotions wait.
+  syncWindows:
+    # Web app prod deploys only on weekdays 9:00-17:00 Eastern. argo-poc-api-prod has no window.
+    - kind: allow
+      description: "argo-poc prod: weekdays 9-5 ET"
+      schedule: "0 9 * * 1-5"
+      duration: 8h
+      timeZone: America/New_York
+      applications: ["argo-poc-prod"]
+      manualSync: true
+    # Ad-hoc freeze example (always active while present):
+    # - kind: deny
+    #   description: "hold: <reason>"
+    #   schedule: "* * * * *"
+    #   duration: 1h
+    #   applications: ["argo-poc-prod"]
+    #   manualSync: true
