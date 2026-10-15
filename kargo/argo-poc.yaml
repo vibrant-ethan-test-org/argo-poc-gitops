@@ -1,5 +1,5 @@
 # Kargo pipeline for argo-poc: Warehouse (new images in GHCR) -> Stage test (automatic) -> Stage prod
-# (Promote button in the Kargo UI, only Freight verified in test).
+# (automatic once Freight is verified in test and has soaked there for 1 minute).
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -21,9 +21,14 @@ kind: ProjectConfig
 metadata:
   name: argo-poc
   namespace: argo-poc
+# Hold switch. These are only the starting values: after creation the Kargo UI owns them
+# (Project Settings -> ProjectConfig, set autoPromotionEnabled to false to hold a Stage) and
+# Argo CD ignores later differences (see argocd/kargo.yaml). Holding test also holds prod.
 spec:
   promotionPolicies:
     - stageSelector: { name: test }
+      autoPromotionEnabled: true
+    - stageSelector: { name: prod }
       autoPromotionEnabled: true
 ---
 apiVersion: kargo.akuity.io/v1alpha1
@@ -70,7 +75,9 @@ metadata:
 spec:
   requestedFreight:
     - origin: { kind: Warehouse, name: images }
-      sources: { stages: [test] }
+      sources:
+        stages: [test]
+        requiredSoakTime: 1m   # time to spot a problem in test (and hold prod) before prod gets it
   promotionTemplate:
     spec:
       steps:
