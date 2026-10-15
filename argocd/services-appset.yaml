@@ -3,12 +3,16 @@
 #                                      namespace <service>-<env> on the cluster named <env>
 # Clusters "test" and "prod" are registered by bootstrap/install.sh.
 # Adding a service is just adding a folder; adding an environment also needs a cluster with that name.
+# Kargo promotes into these apps (see kargo/): it commits to main, then pins the app's
+# targetRevision to that commit, which this ApplicationSet must not undo.
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
   name: services
   namespace: argocd
 spec:
+  ignoreApplicationDifferences:
+    - jsonPointers: [/spec/source/targetRevision]
   goTemplate: true
   goTemplateOptions: ["missingkey=error"]
   generators:
@@ -24,8 +28,8 @@ spec:
         argo-poc/service: '{{ index .path.segments 1 }}'
         argo-poc/env: '{{ .path.basename }}'
       annotations:
-        # Tell GitHub when this app is deployed (see notifications-cm.yaml).
-        notifications.argoproj.io/subscribe.on-deployed.gh-dispatch: ""
+        # Kargo Stage <service>:<env> may update this app.
+        kargo.akuity.io/authorized-stage: '{{ index .path.segments 1 }}:{{ .path.basename }}'
         # Only re-render when this service's folder (base + overlays) changes.
         argocd.argoproj.io/manifest-generate-paths: ../..
     spec:

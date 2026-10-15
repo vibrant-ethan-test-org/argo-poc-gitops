@@ -1,0 +1,16 @@
+# Helm values for Kargo on argo-mgmt. The admin password hash and token signing key are
+# passed by install.sh.
+api:
+  service:
+    type: NodePort
+    nodePort: 31444        # http://localhost:8444 via kind-mgmt.yaml
+  tls:
+    enabled: false         # plain HTTP, reachable only from this Mac
+  rollouts:
+    integrationEnabled: false   # e2e runs in Argo Rollouts on test/prod, not as Kargo verification
+controller:
+  rollouts:
+    integrationEnabled: false
+  reconcilers:
+    warehouses:
+      minReconciliationInterval: 30s   # default 5m; poll GHCR faster for the demo

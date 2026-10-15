@@ -1,0 +1,64 @@
+# The one promotion process every service and Stage uses: write the Freight's image tag and app
+# commit into apps/<service>/overlays/<stage>, push to main, then sync that Argo CD app to exactly
+# that commit. Argo Rollouts then does blue-green + e2e as before; Kargo waits for the app to be
+# Healthy before the Freight counts as verified in the Stage.
+apiVersion: kargo.akuity.io/v1alpha1
+kind: ClusterPromotionTask
+metadata:
+  name: update-overlay
+spec:
+  vars:
+    - name: repoURL
+      value: https://github.com/vibrant-ethan-test-org/argo-poc-gitops.git
+    - name: service      # folder under apps/, also the Argo CD app prefix
+    - name: image        # main image; its tag and commit annotation are used for all images
+    - name: e2eImage     # separate e2e image, or "" when the main image contains the e2e checks
+      value: ""
+  steps:
+    - uses: git-clone
+      config:
+        repoURL: ${{ vars.repoURL }}
+        author: { name: kargo, email: kargo@argo-poc.local }
+        checkout:
+          - branch: main
+            path: ./repo
+    - uses: kustomize-set-image
+      config:
+        path: ./repo/apps/${{ vars.service }}/overlays/${{ ctx.stage }}
+        images:
+          - image: ${{ vars.image }}
+            tag: ${{ imageFrom(vars.image).Tag }}
+    - uses: kustomize-set-image
+      if: ${{ vars.e2eImage != '' }}
+      config:
+        path: ./repo/apps/${{ vars.service }}/overlays/${{ ctx.stage }}
+        images:
+          - image: ${{ vars.e2eImage }}
+            tag: ${{ imageFrom(vars.image).Tag }}
+    # The e2e check compares /version against this commit (release.yaml puts it on the image).
+    - uses: yaml-update
+      config:
+        path: ./repo/apps/${{ vars.service }}/overlays/${{ ctx.stage }}/kustomization.yaml
+        updates:
+          - key: commonAnnotations.argo-poc/app-sha
+            value: ${{ imageFrom(vars.image).Annotations['org.opencontainers.image.revision'] }}
+    - uses: git-commit
+      config:
+        path: ./repo
+        message: >-
+          ${{ vars.service }} ${{ ctx.stage }}: ${{ imageFrom(vars.image).Tag }}
+          (Kargo, freight ${{ ctx.targetFreight.name }}, by ${{ ctx.meta.promotion.actor }})
+    - uses: git-push
+      as: push
+      config:
+        path: ./repo
+    # Pin the app to the pushed commit. All services share main, so without the pin another
+    # service's later commit would move this app's revision and Kargo would call the Stage unhealthy.
+    - uses: argocd-update
+      config:
+        apps:
+          - name: ${{ vars.service }}-${{ ctx.stage }}
+            sources:
+              - repoURL: ${{ vars.repoURL }}
+                desiredRevision: ${{ task.outputs.push.commit }}
+                updateTargetRevision: true

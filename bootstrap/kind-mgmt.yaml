@@ -1,4 +1,4 @@
-# Management (hub) cluster: runs only Argo CD, which deploys to the test and prod clusters.
+# Management (hub) cluster: runs Argo CD and Kargo, which deploy to the test and prod clusters.
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 name: argo-mgmt
@@ -6,3 +6,4 @@ nodes:
   - role: control-plane
     extraPortMappings:
       - { containerPort: 30443, hostPort: 8443, listenAddress: 127.0.0.1 } # Argo CD UI, this Mac only (admin/admin)
+      - { containerPort: 31444, hostPort: 8444, listenAddress: 127.0.0.1 } # Kargo UI, this Mac only (admin/admin)

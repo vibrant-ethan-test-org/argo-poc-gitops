@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Creates three kind clusters and wires them together:
-#   argo-mgmt  Argo CD (UI, ApplicationSet, Notifications, Rollouts UI extension)
+#   argo-mgmt  Argo CD (UI, ApplicationSet, Rollouts UI extension) + Kargo (promotion)
 #   argo-test  Argo Rollouts + all test namespaces
 #   argo-prod  Argo Rollouts + all prod namespaces
 # Registers test and prod with Argo CD, then points Argo CD at this repo.
@@ -9,6 +9,9 @@ set -euo pipefail
 
 ARGOCD_VERSION=v3.5.5
 ROLLOUTS_VERSION=v1.10.0
+CERT_MANAGER_VERSION=v1.20.4
+KARGO_VERSION=1.12.4
+GITOPS_REPO=https://github.com/vibrant-ethan-test-org/argo-poc-gitops.git
 DIR="$(cd "$(dirname "$0")" && pwd)"
 mgmt() { kubectl --context kind-argo-mgmt "$@"; }
 
@@ -52,6 +55,17 @@ hash=$(argocd account bcrypt --password admin)
 mgmt -n argocd patch secret argocd-secret --type merge \
   -p "{\"stringData\":{\"admin.password\":\"$hash\",\"admin.passwordMtime\":\"$(date -u +%FT%TZ)\"}}"
 mgmt -n argocd delete secret argocd-initial-admin-secret --ignore-not-found
+
+# Kargo needs cert-manager for its webhook certificates. Login admin / admin, UI on 127.0.0.1 only.
+echo "==> cert-manager $CERT_MANAGER_VERSION and Kargo $KARGO_VERSION on argo-mgmt"
+helm upgrade --install cert-manager cert-manager --repo https://charts.jetstack.io \
+  --version "$CERT_MANAGER_VERSION" --kube-context kind-argo-mgmt \
+  --namespace cert-manager --create-namespace --set crds.enabled=true --wait
+helm upgrade --install kargo oci://ghcr.io/akuity/kargo-charts/kargo \
+  --version "$KARGO_VERSION" --kube-context kind-argo-mgmt \
+  --namespace kargo --create-namespace -f "$DIR/kargo-values.yaml" \
+  --set-string api.adminAccount.passwordHash="$hash" \
+  --set-string api.adminAccount.tokenSigningKey="$(openssl rand -hex 32)" --wait
 
 # Register a cluster with Argo CD the way `argocd cluster add` does: a ServiceAccount with
 # cluster-admin in the target cluster, and its token in a cluster Secret on argo-mgmt.
@@ -104,15 +118,18 @@ YAML
 register_cluster test
 register_cluster prod
 
+# Kargo pushes promotions to this repo with the PAT, shared by all Kargo Projects.
 TOKEN_FILE="${TOKEN_FILE:-$HOME/.config/argo-poc/token}"
 if [ -f "$TOKEN_FILE" ]; then
-  echo "==> Notifications token from $TOKEN_FILE"
+  echo "==> Kargo git credentials from $TOKEN_FILE"
   tmp=$(mktemp); trap 'rm -f "$tmp"' EXIT
   tr -d '[:space:]' < "$TOKEN_FILE" > "$tmp"
-  mgmt -n argocd create secret generic argocd-notifications-secret --from-file=github-token="$tmp" \
-    --dry-run=client -o yaml | mgmt apply --server-side --force-conflicts -f -
+  mgmt -n kargo-shared-resources create secret generic gitops-repo \
+    --from-literal=repoURL="$GITOPS_REPO" --from-literal=username=kargo --from-file=password="$tmp" \
+    --dry-run=client -o yaml | mgmt label --local -f - kargo.akuity.io/cred-type=git -o yaml \
+    | mgmt apply --server-side --force-conflicts -f -
 else
-  echo "==> No token at $TOKEN_FILE: GitHub notifications will not work until argocd-notifications-secret is set"
+  echo "==> No token at $TOKEN_FILE: Kargo cannot push promotions until secret gitops-repo exists in kargo-shared-resources"
 fi
 
 echo "==> Apps: everything else comes from Git"
@@ -120,3 +137,4 @@ mgmt apply -f "$DIR/../argocd/root.yaml"
 
 echo
 echo "Argo CD UI: https://localhost:8443  (user: admin, password: admin)"
+echo "Kargo UI:   http://localhost:8444   (password: admin)"

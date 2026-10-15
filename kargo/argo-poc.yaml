@@ -1,0 +1,81 @@
+# Kargo pipeline for argo-poc: Warehouse (new images in GHCR) -> Stage test (automatic) -> Stage prod
+# (Promote button in the Kargo UI, only Freight verified in test).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argo-poc
+  labels:
+    kargo.akuity.io/project: "true"   # lets the Project adopt this namespace
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Project
+metadata:
+  name: argo-poc
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: ProjectConfig
+metadata:
+  name: argo-poc
+  namespace: argo-poc
+spec:
+  promotionPolicies:
+    - stageSelector: { name: test }
+      autoPromotionEnabled: true
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Warehouse
+metadata:
+  name: images
+  namespace: argo-poc
+spec:
+  interval: 30s
+  subscriptions:
+    - image:
+        repoURL: ghcr.io/vibrant-ethan-test-org/argo-poc-app
+        imageSelectionStrategy: SemVer
+    - image:
+        repoURL: ghcr.io/vibrant-ethan-test-org/argo-poc-e2e
+        imageSelectionStrategy: SemVer
+  # Both images are built by the same CI run; only pair images with the same tag.
+  freightCreationCriteria:
+    expression: imageFrom('ghcr.io/vibrant-ethan-test-org/argo-poc-app').Tag == imageFrom('ghcr.io/vibrant-ethan-test-org/argo-poc-e2e').Tag
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: test
+  namespace: argo-poc
+spec:
+  requestedFreight:
+    - origin: { kind: Warehouse, name: images }
+      sources: { direct: true }
+  promotionTemplate:
+    spec:
+      steps:
+        - task: { name: update-overlay, kind: ClusterPromotionTask }
+          vars:
+            - { name: service, value: argo-poc }
+            - { name: image, value: ghcr.io/vibrant-ethan-test-org/argo-poc-app }
+            - { name: e2eImage, value: "ghcr.io/vibrant-ethan-test-org/argo-poc-e2e" }
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: prod
+  namespace: argo-poc
+spec:
+  requestedFreight:
+    - origin: { kind: Warehouse, name: images }
+      sources: { stages: [test] }
+  promotionTemplate:
+    spec:
+      steps:
+        - task: { name: update-overlay, kind: ClusterPromotionTask }
+          vars:
+            - { name: service, value: argo-poc }
+            - { name: image, value: ghcr.io/vibrant-ethan-test-org/argo-poc-app }
+            - { name: e2eImage, value: "ghcr.io/vibrant-ethan-test-org/argo-poc-e2e" }
