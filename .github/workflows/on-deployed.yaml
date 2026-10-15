@@ -8,8 +8,10 @@ on:
   repository_dispatch:
     types: [app-deployed]
 
+# One group per app: different apps run in parallel. GitHub keeps only one waiting run per group,
+# so a single shared group would cancel events when several apps report at once.
 concurrency:
-  group: on-deployed
+  group: on-deployed-${{ github.event.client_payload.app }}
   cancel-in-progress: false
 
 env:
