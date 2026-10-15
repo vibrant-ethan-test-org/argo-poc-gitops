@@ -54,7 +54,7 @@ spec:
           vars:
             - { name: service, value: argo-poc-api }
             - { name: image, value: ghcr.io/vibrant-ethan-test-org/argo-poc-api }
-            - { name: e2eImage, value: "" }
+            - { name: e2eImage, value: ghcr.io/vibrant-ethan-test-org/argo-poc-api }  # /e2e in the same image
 ---
 apiVersion: kargo.akuity.io/v1alpha1
 kind: Stage
@@ -72,4 +72,4 @@ spec:
           vars:
             - { name: service, value: argo-poc-api }
             - { name: image, value: ghcr.io/vibrant-ethan-test-org/argo-poc-api }
-            - { name: e2eImage, value: "" }
+            - { name: e2eImage, value: ghcr.io/vibrant-ethan-test-org/argo-poc-api }  # /e2e in the same image

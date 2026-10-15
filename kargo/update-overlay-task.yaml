@@ -12,8 +12,7 @@ spec:
       value: https://github.com/vibrant-ethan-test-org/argo-poc-gitops.git
     - name: service      # folder under apps/, also the Argo CD app prefix
     - name: image        # main image; its tag and commit annotation are used for all images
-    - name: e2eImage     # separate e2e image, or "" when the main image contains the e2e checks
-      value: ""
+    - name: e2eImage     # e2e image; the same as image when the main image contains the e2e checks
   steps:
     - uses: git-clone
       config:
@@ -29,7 +28,7 @@ spec:
           - image: ${{ vars.image }}
             tag: ${{ imageFrom(vars.image).Tag }}
     - uses: kustomize-set-image
-      if: ${{ vars.e2eImage != '' }}
+      if: ${{ vars.e2eImage != vars.image }}
       config:
         path: ./repo/apps/${{ vars.service }}/overlays/${{ ctx.stage }}
         images:
