@@ -6,11 +6,11 @@ resources:
 - ../../base
 images:
 - name: ghcr.io/vibrant-ethan-test-org/argo-poc-app
-  newTag: v0.1.12
+  newTag: v0.1.13
 - name: ghcr.io/vibrant-ethan-test-org/argo-poc-e2e
-  newTag: v0.1.12
+  newTag: v0.1.13
 commonAnnotations:
-  argo-poc/app-sha: 5ed2eab537bb0fa9d9b87a68fcd6b5ff15200eac
+  argo-poc/app-sha: 807addd9d0a2c6651fee7d89eed42efc81caf80a
 patches:
 - patch: |-
     - op: add
