@@ -17,3 +17,13 @@ spec:
   clusterResourceWhitelist:
     - group: ""
       kind: Namespace
+  # Prod freeze / time windows. Kargo still commits promotions during a deny window, then its
+  # argocd-update step waits (up to 72h) for Argo CD to be allowed to sync. manualSync: true lets a
+  # person's Promote in the Kargo UI through; auto-promotions wait.
+  syncWindows:
+    - kind: deny
+      description: "hold: sync-window test"
+      schedule: "* * * * *"   # starts every minute and lasts an hour, so always active
+      duration: 1h
+      applications: ["*-prod"]
+      manualSync: true
