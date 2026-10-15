@@ -41,16 +41,34 @@ push to an app repo's main
     pins Argo CD app <service>-test to that commit
   → Argo CD syncs → Argo Rollouts: green up, e2e on preview, switch traffic
   → Kargo sees the app Healthy at that commit → Freight "verified in test"
-  → Kargo UI: Promote the verified Freight to prod (button) → same steps for overlays/prod
+  → after 1 minute in test (soak), Stage prod auto-promotes it → same steps for overlays/prod
 ```
 
-Deploying is still a Git commit that Argo CD applies. Kargo decides **when** to write it (automatically for test,
-on the Promote button for prod) and only offers prod Freight that passed test. Commits are authored by `kargo`
+Deploying is still a Git commit that Argo CD applies. Kargo decides **when** to write it (automatically, unless a
+Stage is held) and only lets prod have Freight that passed test and soaked there for 1 minute. Commits are authored by `kargo`
 and say which Freight and who promoted it.
 
 If e2e fails, Rollouts aborts and the old version keeps serving. The app goes Degraded, the Kargo Stage goes
 Unhealthy, the Freight is never verified, and Kargo refuses to promote it to prod ("Freight is not available to
 this Stage"). Pushing a fix produces new Freight that auto-promotes to test and replaces it.
+
+## Holding a release
+
+Both Stages auto-promote by default. Two ways to stop that, both in the Kargo UI (http://localhost:8444):
+
+| Goal | How | Undo |
+|---|---|---|
+| Keep a specific build in test (or prod) for manual testing | Promote that build to the Stage yourself. If it is not the newest build, Kargo puts a **hold** on the Stage; the Stage shows a "paused" alert | **Resume** button on the Stage (promotes the newest build and lifts the hold) |
+| Stop everything going to a Stage, e.g. something looks wrong | Project → Settings → ProjectConfig: set `autoPromotionEnabled: false` for that Stage and save | Set it back to `true`; Kargo promotes the newest eligible build (builds in between are skipped) |
+
+Holding test also holds prod, because prod only takes what passed test. Manual Promote still works during a
+hold. A running promotion can be stopped with **Abort**. The 1-minute soak applies to manual promotion to
+prod too, so a hotfix cannot skip it unless `requiredSoakTime` in `kargo/<service>.yaml` is lowered.
+
+The ProjectConfig in `kargo/<service>.yaml` only sets the starting values: Argo CD creates it, then ignores
+changes to `promotionPolicies` (`argocd/kargo.yaml`), so a hold set in the UI is not reverted. Editing those
+values in Git has no effect on an existing project. (Time-based freezes, Kargo "promotion windows", are a Kargo
+Enterprise feature; open-source Kargo ignores them.)
 
 ## Layout
 
@@ -62,7 +80,7 @@ this Stage"). Pushing a fix produces new Freight that auto-promotes to test and 
 | `argocd/services-appset.yaml` | ApplicationSet: one app `<service>-<env>` per `apps/*/overlays/*` folder, deployed to cluster `<env>`, authorized for Kargo Stage `<service>:<env>` |
 | `argocd/kargo.yaml` | Argo CD app that syncs `kargo/` |
 | `argocd/` (rest) | AppProject, `root` (app-of-apps) |
-| `kargo/<service>.yaml` | Kargo Project, auto-promotion policy for test, Warehouse, Stages `test` and `prod` |
+| `kargo/<service>.yaml` | Kargo Project, starting auto-promotion switches, Warehouse, Stages `test` and `prod` (1-minute soak) |
 | `kargo/update-overlay-task.yaml` | The promotion steps every Stage runs: clone, set image tags + app-sha, commit, push, sync the Argo CD app |
 | `.github/workflows/release.yaml` | Shared CI called by every app repo: build and push images |
 
@@ -97,7 +115,9 @@ or open the app in Argo CD, click the `app` Rollout, then the **Rollout** tab.
 
 | Scenario | How | What happens |
 |---|---|---|
-| Happy path | Push an app change | Kargo auto-promotes to test, blue-green + e2e pass, Freight verified; Promote in the Kargo UI deploys prod the same way |
+| Happy path | Push an app change | Kargo auto-promotes to test, blue-green + e2e pass, Freight verified; 1 minute later prod auto-promotes the same way |
+| Hold prod | ProjectConfig `autoPromotionEnabled: false` for prod, then push a change | Test gets it, prod stays put; setting it back to `true` promotes the newest build to prod |
+| Hold test | Promote an older build to test in the UI | Kargo records a hold; new builds wait until **Resume** |
 | Broken release | Push a change that breaks the page but not `/healthz` | e2e fails on preview, rollout aborted, test keeps the old version, Stage Unhealthy, Kargo will not promote it to prod |
 | Fix forward | Push the fix | New Freight auto-promotes to test and becomes verified |
 | Rollback | Kargo UI: promote an older verified Freight to prod | Kargo commits the old tag; blue-green + e2e as usual |
