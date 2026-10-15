@@ -46,7 +46,7 @@ spec:
         path: ./repo
         message: >-
           ${{ vars.service }} ${{ ctx.stage }}: ${{ imageFrom(vars.image).Tag }}
-          (Kargo, freight ${{ ctx.targetFreight.name }}, by ${{ ctx.meta.promotion.actor }})
+          (Kargo, freight ${{ ctx.targetFreight.name }}, by ${{ ctx.meta.promotion.actor != '' ? ctx.meta.promotion.actor : 'auto-promotion' }})
     - uses: git-push
       as: push
       config:
