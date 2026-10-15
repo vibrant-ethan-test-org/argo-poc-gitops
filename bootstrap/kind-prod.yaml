@@ -1,0 +1,11 @@
+# Prod cluster: Argo Rollouts plus every service's prod namespace. Deployed to by Argo CD in argo-mgmt.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: argo-prod
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - { containerPort: 30091, hostPort: 8091 } # argo-poc active
+      - { containerPort: 30092, hostPort: 8092 } # argo-poc preview
+      - { containerPort: 30191, hostPort: 8191 } # argo-poc-api active
+      - { containerPort: 30192, hostPort: 8192 } # argo-poc-api preview

@@ -1,6 +1,8 @@
 # One Argo CD Application per service per environment, from the folders in apps/:
-#   apps/<service>/overlays/<env>  ->  Application <service>-<env> in namespace <service>-<env>
-# Adding a service or environment is just adding a folder.
+#   apps/<service>/overlays/<env>  ->  Application <service>-<env>,
+#                                      namespace <service>-<env> on the cluster named <env>
+# Clusters "test" and "prod" are registered by bootstrap/install.sh.
+# Adding a service is just adding a folder; adding an environment also needs a cluster with that name.
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
@@ -33,7 +35,7 @@ spec:
         targetRevision: main
         path: '{{ .path.path }}'
       destination:
-        server: https://kubernetes.default.svc
+        name: '{{ .path.basename }}'   # overlays/test -> cluster "test", overlays/prod -> cluster "prod"
         namespace: '{{ index .path.segments 1 }}-{{ .path.basename }}'
       syncPolicy:
         automated:
