@@ -1,0 +1,18 @@
+# Limits the PoC apps to this repo and the two app namespaces.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: argo-poc
+  namespace: argocd
+spec:
+  description: Argo CD + Argo Rollouts PoC
+  sourceRepos:
+    - https://github.com/vibrant-ethan-test-org/argo-poc-gitops.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: app-test
+    - server: https://kubernetes.default.svc
+      namespace: app-prod
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace

@@ -1,0 +1,28 @@
+# When an app is synced and Healthy at a new Git revision, tell GitHub via repository_dispatch.
+# For Rollouts, Healthy means e2e passed and traffic switched to the new version.
+# The token lives in argocd-notifications-secret (key: github-token), never in Git.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-notifications-cm
+  namespace: argocd
+data:
+  service.webhook.gh-dispatch: |
+    url: https://api.github.com
+    headers:
+      - name: Authorization
+        value: Bearer $github-token
+      - name: Accept
+        value: application/vnd.github+json
+  template.app-deployed: |
+    webhook:
+      gh-dispatch:
+        method: POST
+        path: /repos/vibrant-ethan-test-org/argo-poc-gitops/dispatches
+        body: |
+          {"event_type":"app-deployed","client_payload":{"app":"{{.app.metadata.name}}","revision":"{{.app.status.sync.revision}}"}}
+  trigger.on-deployed: |
+    - description: Synced and Healthy at a new revision
+      when: app.status.operationState != nil and app.status.operationState.phase in ['Succeeded'] and app.status.health.status == 'Healthy'
+      oncePer: app.status.sync.revision
+      send: [app-deployed]

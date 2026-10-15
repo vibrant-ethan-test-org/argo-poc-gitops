@@ -1,0 +1,27 @@
+# Argo Rollouts adds a pod-template-hash selector to each Service,
+# pointing app-active at the live version and app-preview at the new one.
+apiVersion: v1
+kind: Service
+metadata:
+  name: app-active
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: argo-poc
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: app-preview
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: argo-poc
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

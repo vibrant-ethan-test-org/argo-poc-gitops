@@ -1,0 +1,28 @@
+# prod environment. The image tags and app-sha below are what CI and promotion change.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: app-prod
+resources:
+- ../../base
+images:
+- name: ghcr.io/vibrant-ethan-test-org/argo-poc-app
+  newTag: v0.0.0
+- name: ghcr.io/vibrant-ethan-test-org/argo-poc-e2e
+  newTag: v0.0.0
+commonAnnotations:
+  argo-poc/app-sha: unset
+patches:
+- patch: |-
+    - op: add
+      path: /spec/ports/0/nodePort
+      value: 30091
+  target:
+    kind: Service
+    name: app-active
+- patch: |-
+    - op: add
+      path: /spec/ports/0/nodePort
+      value: 30092
+  target:
+    kind: Service
+    name: app-preview

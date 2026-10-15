@@ -1,0 +1,114 @@
+# Runs when Argo CD reports that app-test or app-prod is deployed and Healthy.
+# 1. Records a GitHub Deployment on the app commit, so the app repo shows what runs where.
+# 2. After a test deploy, opens a PR that promotes the same version to prod.
+# Argo CD fires once per gitops revision, so every step here is idempotent.
+name: on-deployed
+
+on:
+  repository_dispatch:
+    types: [app-deployed]
+
+concurrency:
+  group: on-deployed
+  cancel-in-progress: false
+
+env:
+  APP_REPO: vibrant-ethan-test-org/argo-poc-app
+  REGISTRY: ghcr.io/vibrant-ethan-test-org
+  APP: ${{ github.event.client_payload.app }}
+  REVISION: ${{ github.event.client_payload.revision }}
+  GH_TOKEN: ${{ secrets.POC_PAT }}
+
+jobs:
+  deployed:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.POC_PAT }}
+
+      - name: Read deployed version
+        id: v
+        run: |
+          case "$APP" in
+            app-test) env=test ;;
+            app-prod) env=prod ;;
+            *) echo "::error::Unknown app '$APP'"; exit 1 ;;
+          esac
+          if ! [[ "$REVISION" =~ ^[0-9a-f]{40}$ ]]; then echo "::error::Bad revision '$REVISION'"; exit 1; fi
+          file="apps/argo-poc/overlays/$env/kustomization.yaml"
+          tag=$(git show "$REVISION:$file" | yq ".images[] | select(.name == \"$REGISTRY/argo-poc-app\") | .newTag")
+          sha=$(git show "$REVISION:$file" | yq '.commonAnnotations["argo-poc/app-sha"]')
+          echo "$APP at gitops $REVISION runs $tag (app commit $sha)"
+          { echo "env=$env"; echo "tag=$tag"; echo "sha=$sha"; } >> "$GITHUB_OUTPUT"
+
+      - name: Record GitHub Deployment on the app commit
+        if: steps.v.outputs.sha != 'unset'
+        env:
+          ENV: ${{ steps.v.outputs.env }}
+          TAG: ${{ steps.v.outputs.tag }}
+          SHA: ${{ steps.v.outputs.sha }}
+        run: |
+          last=$(gh api "repos/$APP_REPO/deployments?environment=$ENV&per_page=1" --jq '.[0].payload.tag // ""')
+          if [ "$last" = "$TAG" ]; then echo "$ENV already recorded at $TAG"; exit 0; fi
+          [ "$ENV" = test ] && url=http://localhost:8081 || url=http://localhost:8091
+          id=$(jq -n --arg ref "$SHA" --arg env "$ENV" --arg tag "$TAG" '{
+                ref: $ref, environment: $env, description: $tag, auto_merge: false,
+                required_contexts: [], payload: {tag: $tag},
+                production_environment: ($env == "prod")}' \
+               | gh api "repos/$APP_REPO/deployments" --input - --jq .id)
+          gh api "repos/$APP_REPO/deployments/$id/statuses" \
+            -f state=success -f environment_url="$url" \
+            -f log_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$REVISION" \
+            -f description="Argo CD: $APP Healthy at $TAG" --silent
+          echo "Recorded $ENV deployment $id for $TAG"
+
+      - name: Open prod promotion PR
+        if: steps.v.outputs.env == 'test' && steps.v.outputs.sha != 'unset'
+        env:
+          TAG: ${{ steps.v.outputs.tag }}
+          SHA: ${{ steps.v.outputs.sha }}
+        run: |
+          prod=apps/argo-poc/overlays/prod/kustomization.yaml
+          prod_tag=$(yq ".images[] | select(.name == \"$REGISTRY/argo-poc-app\") | .newTag" "$prod")
+          prod_sha=$(yq '.commonAnnotations["argo-poc/app-sha"]' "$prod")
+          if [ "$prod_tag" = "$TAG" ]; then echo "prod already runs $TAG"; exit 0; fi
+          branch="promote/prod-$TAG"
+          if [ -n "$(gh pr list --head "$branch" --state open --json number --jq '.[].number')" ]; then
+            echo "PR for $TAG already open"; exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          (cd apps/argo-poc/overlays/prod &&
+            kustomize edit set image "$REGISTRY/argo-poc-app:$TAG" "$REGISTRY/argo-poc-e2e:$TAG" &&
+            kustomize edit add annotation "argo-poc/app-sha:$SHA" --force)
+          git commit -am "prod: argo-poc-app $TAG ($APP_REPO@$SHA)"
+          git push -f origin "$branch"
+
+          if [ "$prod_sha" = unset ]; then
+            changes="- First promotion to prod"
+          else
+            changes=$(gh api "repos/$APP_REPO/compare/$prod_sha...$SHA" \
+              --jq '.commits | reverse | .[] | "- \(.sha[0:7]) \(.commit.message | split("\n")[0]) (\(.commit.author.name))"')
+          fi
+          body=$(printf '%s\n' \
+            "Promotes **argo-poc-app $TAG** to prod. It passed blue-green and e2e in test." \
+            "" \
+            "| | Tag | App commit |" \
+            "|---|---|---|" \
+            "| prod now | \`$prod_tag\` | $APP_REPO@$prod_sha |" \
+            "| prod after merge | \`$TAG\` | $APP_REPO@$SHA |" \
+            "" \
+            "### App changes" \
+            "$changes" \
+            "" \
+            "Merging lets Argo CD sync app-prod, which runs blue-green with e2e again before switching traffic.")
+          gh pr create --base main --head "$branch" --title "prod: argo-poc-app $TAG" --body "$body"
+
+          # Close older promotion PRs that this one supersedes.
+          gh pr list --state open --json number,headRefName \
+            --jq ".[] | select(.headRefName | startswith(\"promote/prod-\")) | select(.headRefName != \"$branch\") | .number" |
+          while read -r n; do gh pr close "$n" --delete-branch --comment "Superseded by $TAG."; done

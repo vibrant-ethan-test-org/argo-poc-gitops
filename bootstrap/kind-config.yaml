@@ -1,0 +1,13 @@
+# Single-node kind cluster for the Argo CD + Argo Rollouts PoC.
+# NodePorts are mapped to fixed localhost ports so URLs stay stable.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: argo-poc
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - { containerPort: 30443, hostPort: 8443 } # Argo CD UI
+      - { containerPort: 30081, hostPort: 8081 } # app-test active
+      - { containerPort: 30082, hostPort: 8082 } # app-test preview
+      - { containerPort: 30091, hostPort: 8091 } # app-prod active
+      - { containerPort: 30092, hostPort: 8092 } # app-prod preview

@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: app-test
+  namespace: argocd
+  annotations:
+    # Tell GitHub when this app is deployed (see notifications-cm.yaml).
+    notifications.argoproj.io/subscribe.on-deployed.gh-dispatch: ""
+spec:
+  project: argo-poc
+  source:
+    repoURL: https://github.com/vibrant-ethan-test-org/argo-poc-gitops.git
+    targetRevision: main
+    path: apps/argo-poc/overlays/test
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: app-test
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
