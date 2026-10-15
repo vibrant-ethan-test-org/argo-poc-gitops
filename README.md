@@ -3,6 +3,19 @@
 Deployment config for the Argo CD + Argo Rollouts proof of concept. Argo CD reads only this repo.
 Each service's code and CI live in its own repo; all of them deploy through this one.
 
+Three local kind clusters:
+
+```
+ kind-argo-mgmt   Argo CD (one UI) + ApplicationSet + Notifications + Rollouts UI extension
+      │  Kubernetes API over the Docker "kind" network (https://argo-<env>-control-plane:6443)
+      ├────────► kind-argo-test   Argo Rollouts + argo-poc-test, argo-poc-api-test
+      └────────► kind-argo-prod   Argo Rollouts + argo-poc-prod, argo-poc-api-prod
+```
+
+Argo CD reaches test and prod with an `argocd-manager` ServiceAccount in each, stored on argo-mgmt as
+cluster Secrets named `test` and `prod`. The ApplicationSet sends `overlays/<env>` to the cluster named `<env>`.
+Argo Rollouts and the e2e Jobs run in the cluster where the app runs.
+
 | Service | App repo | Test | Prod |
 |---|---|---|---|
 | `argo-poc` (web page) | [argo-poc-app](https://github.com/vibrant-ethan-test-org/argo-poc-app) | http://localhost:8081 | http://localhost:8091 |
@@ -28,10 +41,10 @@ the app goes Degraded, no notification fires and no prod PR is opened.
 
 | Path | What |
 |---|---|
-| `bootstrap/` | `kind-config.yaml`, `install.sh` (cluster, Argo CD, Argo Rollouts, UI extension, root app) |
+| `bootstrap/` | `kind-{mgmt,test,prod}.yaml`, `install.sh` (three clusters, Argo CD, Argo Rollouts, UI extension, cluster registration, root app) |
 | `apps/<service>/base/` | Rollout (blue-green), `app-active` / `app-preview` Services, `e2e` AnalysisTemplate |
 | `apps/<service>/overlays/{test,prod}/` | Namespace, image tags, `argo-poc/app-sha`, NodePorts. CI and promotion change only these. |
-| `argocd/services-appset.yaml` | ApplicationSet: one app `<service>-<env>` per `apps/*/overlays/*` folder |
+| `argocd/services-appset.yaml` | ApplicationSet: one app `<service>-<env>` per `apps/*/overlays/*` folder, deployed to cluster `<env>` |
 | `argocd/` (rest) | AppProject, `root` (app-of-apps), notifications config |
 | `services.yaml` | Service registry: app repo, main image, URLs |
 | `.github/workflows/release.yaml` | Shared CI called by every app repo: build, push, deploy to test |
@@ -49,18 +62,19 @@ Prereqs: Docker Desktop, `brew install kind argocd kustomize argoproj/tap/kubect
      tr -d '[:space:]' < ~/.config/argo-poc/token | gh secret set POC_PAT -R vibrant-ethan-test-org/$r
    done
    ```
-2. **Everything else:** `./bootstrap/install.sh`. It creates the cluster, installs Argo CD and Argo Rollouts,
-   loads the token into `argocd-notifications-secret`, and applies `argocd/root.yaml`. All apps then come from Git.
+2. **Everything else:** `./bootstrap/install.sh` (about 2 minutes). It creates the three clusters, installs Argo CD
+   on argo-mgmt and Argo Rollouts on test and prod, registers test and prod with Argo CD, loads the token into
+   `argocd-notifications-secret`, and applies `argocd/root.yaml`. All apps then come from Git.
 
 GHCR images must be public (Org settings → Packages must allow public packages), or the cluster needs a pull secret.
 
 Argo CD: https://localhost:8443, user `admin`, password:
 
 ```sh
-kubectl --context kind-argo-poc -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo
+kubectl --context kind-argo-mgmt -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo
 ```
 
-Watch a rollout: `kubectl argo rollouts --context kind-argo-poc -n argo-poc-api-test get rollout app --watch`,
+Watch a rollout: `kubectl argo rollouts --context kind-argo-test -n argo-poc-api-test get rollout app --watch`,
 or open the app in Argo CD, click the `app` Rollout, then the **Rollout** tab.
 
 ## Adding a service
@@ -68,7 +82,8 @@ or open the app in Argo CD, click the `app` Rollout, then the **Rollout** tab.
 1. New app repo with a `ci.yaml` that calls
    `vibrant-ethan-test-org/argo-poc-gitops/.github/workflows/release.yaml@main` with its `service` name and `images`.
    Set the `POC_PAT` secret on it and add the repo to the PAT.
-2. Here: `apps/<service>/base` and `overlays/{test,prod}` (unique NodePorts), and an entry in `services.yaml`.
+2. Here: `apps/<service>/base` and `overlays/{test,prod}` (unique NodePorts), an entry in `services.yaml`, and
+   port mappings in `bootstrap/kind-test.yaml` and `kind-prod.yaml` (needs a cluster rebuild).
    The ApplicationSet creates `<service>-test` and `<service>-prod` automatically.
 3. After the first CI run, make the new GHCR package public, then set the prod overlay to the first tag.
 
@@ -82,7 +97,8 @@ or open the app in Argo CD, click the `app` Rollout, then the **Rollout** tab.
 | Rollback (GitOps) | `git revert` the prod promotion commit | Prod returns to the previous version through blue-green + e2e |
 | `kubectl argo rollouts undo` | Run it against prod | Argo CD self-heals the Rollout back to Git within seconds. With self-heal on, roll back in Git. |
 | Self-heal | Scale the Rollout by hand | Argo CD restores `replicas: 2` within seconds |
-| Disaster recovery | `kind delete cluster --name argo-poc && ./bootstrap/install.sh` | The whole platform and every service come back from Git |
+| Separate clusters | Release a change | Test's blue-green and e2e run on argo-test, prod's on argo-prod; Argo CD on argo-mgmt drives both |
+| Disaster recovery | Delete the clusters, run `./bootstrap/install.sh` | All three clusters and every service come back from Git in about 2 minutes |
 
 ## Lessons from building it
 
@@ -97,9 +113,13 @@ or open the app in Argo CD, click the `app` Rollout, then the **Rollout** tab.
 - **First deploy skips e2e.** A Rollout's first version has nothing to compare against and goes live directly.
 - **Multi-arch images.** GitHub runners are amd64 and the kind node on Apple silicon is arm64, so CI builds both.
 - **Polling.** GitHub cannot reach a laptop, so Argo CD polls every 30s (`timeout.reconciliation`).
+- **Cluster addresses.** `localhost` ports work from your Mac but not from pods. Argo CD reaches test and prod
+  by their node names on the shared Docker network (`argo-test-control-plane:6443`), which are in the API certificates.
+- **Dropped events.** GitHub keeps one waiting run per concurrency group and cancels older ones, so
+  `on-deployed.yaml` uses one group per app.
 
 ## Teardown
 
 ```sh
-kind delete cluster --name argo-poc
+for c in mgmt test prod; do kind delete cluster --name argo-$c; done
 ```
