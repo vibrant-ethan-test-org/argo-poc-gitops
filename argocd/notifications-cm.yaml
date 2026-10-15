@@ -21,8 +21,14 @@ data:
         path: /repos/vibrant-ethan-test-org/argo-poc-gitops/dispatches
         body: |
           {"event_type":"app-deployed","client_payload":{"app":"{{.app.metadata.name}}","revision":"{{.app.status.sync.revision}}"}}
+  # "Became Healthy after the sync finished": right after a sync, the app can still report the
+  # previous version's Healthy status for a moment, before Argo Rollouts starts the new version.
+  # Requiring a newer health transition makes the trigger wait for e2e and the traffic switch.
   trigger.on-deployed: |
-    - description: Synced and Healthy at a new revision
-      when: app.status.operationState != nil and app.status.operationState.phase in ['Succeeded'] and app.status.health.status == 'Healthy'
+    - description: Became Healthy after a successful sync at a new revision
+      when: >-
+        app.status.operationState != nil and app.status.operationState.phase in ['Succeeded'] and
+        app.status.health.status == 'Healthy' and app.status.health.lastTransitionTime != nil and
+        app.status.health.lastTransitionTime > app.status.operationState.finishedAt
       oncePer: app.status.sync.revision
       send: [app-deployed]
