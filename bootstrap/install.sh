@@ -21,6 +21,8 @@ k -n argocd patch configmap argocd-cm --type merge -p '{"data":{"timeout.reconci
 # Expose the UI on https://localhost:8443 via the kind port mapping.
 k -n argocd patch svc argocd-server -p '{"spec":{"type":"NodePort","ports":[{"port":443,"nodePort":30443}]}}'
 k -n argocd rollout restart statefulset/argocd-application-controller
+# Argo Rollouts UI extension (Rollout tab in the Argo CD UI).
+k -n argocd patch deployment argocd-server --patch-file "$DIR/argocd-rollout-extension.yaml"
 
 echo "==> Argo Rollouts $ROLLOUTS_VERSION"
 k create namespace argo-rollouts --dry-run=client -o yaml | k apply -f -

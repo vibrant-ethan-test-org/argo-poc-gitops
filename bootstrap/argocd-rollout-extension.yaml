@@ -1,0 +1,30 @@
+# Adds the Argo Rollouts UI extension to Argo CD: a "Rollout" tab on Rollout resources
+# showing revisions, active/preview, analysis runs, and Promote/Abort buttons.
+# An init container downloads the extension into a volume the Argo CD server reads.
+spec:
+  template:
+    spec:
+      initContainers:
+        - name: rollout-extension
+          image: quay.io/argoprojlabs/argocd-extension-installer:v1.1.0
+          env:
+            - name: EXTENSION_NAME
+              value: rollout
+            - name: EXTENSION_VERSION
+              value: v0.4.0
+            - name: EXTENSION_URL
+              value: https://github.com/argoproj-labs/rollout-extension/releases/download/v0.4.0/extension.tar
+          volumeMounts:
+            - name: extensions
+              mountPath: /tmp/extensions/
+          securityContext:
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+      containers:
+        - name: argocd-server
+          volumeMounts:
+            - name: extensions
+              mountPath: /tmp/extensions/
+      volumes:
+        - name: extensions
+          emptyDir: {}
