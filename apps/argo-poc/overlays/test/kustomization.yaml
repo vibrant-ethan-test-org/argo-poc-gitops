@@ -1,7 +1,7 @@
 # test environment. The image tags and app-sha below are what CI and promotion change.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-namespace: app-test
+namespace: argo-poc-test
 resources:
 - ../../base
 images:

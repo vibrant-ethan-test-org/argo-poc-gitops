@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Creates the kind cluster and installs Argo CD and Argo Rollouts. Safe to re-run.
+# Creates the kind cluster, installs Argo CD and Argo Rollouts, and points Argo CD at this repo.
+# Everything after that (projects, apps, notifications) comes from Git. Safe to re-run.
 set -euo pipefail
 
 ARGOCD_VERSION=v3.5.5
@@ -34,6 +35,20 @@ k -n argocd rollout status deploy/argocd-server --timeout=300s
 k -n argocd rollout status deploy/argocd-repo-server --timeout=300s
 k -n argocd rollout status statefulset/argocd-application-controller --timeout=300s
 k -n argo-rollouts rollout status deploy/argo-rollouts --timeout=300s
+
+TOKEN_FILE="${TOKEN_FILE:-$HOME/.config/argo-poc/token}"
+if [ -f "$TOKEN_FILE" ]; then
+  echo "==> Notifications token from $TOKEN_FILE"
+  tmp=$(mktemp); trap 'rm -f "$tmp"' EXIT
+  tr -d '[:space:]' < "$TOKEN_FILE" > "$tmp"
+  k -n argocd create secret generic argocd-notifications-secret --from-file=github-token="$tmp" \
+    --dry-run=client -o yaml | k apply --server-side --force-conflicts -f -
+else
+  echo "==> No token at $TOKEN_FILE: GitHub notifications will not work until argocd-notifications-secret is set"
+fi
+
+echo "==> Apps: everything else comes from Git"
+k apply -f "$DIR/../argocd/root.yaml"
 
 echo
 echo "Argo CD UI: https://localhost:8443  (user: admin)"

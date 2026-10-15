@@ -1,0 +1,26 @@
+# test environment. The image tag and app-sha below are what CI and promotion change.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: argo-poc-api-test
+resources:
+- ../../base
+images:
+- name: ghcr.io/vibrant-ethan-test-org/argo-poc-api
+  newTag: v0.0.0
+commonAnnotations:
+  argo-poc/app-sha: unset
+patches:
+- patch: |-
+    - op: add
+      path: /spec/ports/0/nodePort
+      value: 30181
+  target:
+    kind: Service
+    name: app-active
+- patch: |-
+    - op: add
+      path: /spec/ports/0/nodePort
+      value: 30182
+  target:
+    kind: Service
+    name: app-preview
