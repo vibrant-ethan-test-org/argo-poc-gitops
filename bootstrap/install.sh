@@ -45,6 +45,14 @@ for c in test prod; do
   kubectl --context "kind-argo-$c" -n argo-rollouts rollout status deploy/argo-rollouts --timeout=300s
 done
 
+# Fixed local login admin / admin instead of a random password per rebuild. Fine only because
+# the UI listens on 127.0.0.1 (see kind-mgmt.yaml). Argo CD reads the bcrypt hash from argocd-secret.
+echo "==> Argo CD admin password: admin"
+hash=$(argocd account bcrypt --password admin)
+mgmt -n argocd patch secret argocd-secret --type merge \
+  -p "{\"stringData\":{\"admin.password\":\"$hash\",\"admin.passwordMtime\":\"$(date -u +%FT%TZ)\"}}"
+mgmt -n argocd delete secret argocd-initial-admin-secret --ignore-not-found
+
 # Register a cluster with Argo CD the way `argocd cluster add` does: a ServiceAccount with
 # cluster-admin in the target cluster, and its token in a cluster Secret on argo-mgmt.
 # The server address is the node's name on the shared Docker "kind" network, which pods in
@@ -111,5 +119,4 @@ echo "==> Apps: everything else comes from Git"
 mgmt apply -f "$DIR/../argocd/root.yaml"
 
 echo
-echo "Argo CD UI: https://localhost:8443  (user: admin)"
-echo "Password:   kubectl --context kind-argo-mgmt -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d"
+echo "Argo CD UI: https://localhost:8443  (user: admin, password: admin)"

@@ -68,11 +68,8 @@ Prereqs: Docker Desktop, `brew install kind argocd kustomize argoproj/tap/kubect
 
 GHCR images must be public (Org settings → Packages must allow public packages), or the cluster needs a pull secret.
 
-Argo CD: https://localhost:8443, user `admin`, password:
-
-```sh
-kubectl --context kind-argo-mgmt -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo
-```
+Argo CD: https://localhost:8443, user `admin`, password `admin`. `install.sh` sets this fixed password so it
+survives rebuilds; the UI port listens on 127.0.0.1 only, so other machines on your network cannot reach it.
 
 Watch a rollout: `kubectl argo rollouts --context kind-argo-test -n argo-poc-api-test get rollout app --watch`,
 or open the app in Argo CD, click the `app` Rollout, then the **Rollout** tab.
