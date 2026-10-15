@@ -1,75 +1,85 @@
 # argo-poc-gitops
 
-Deployment config for the Argo CD + Argo Rollouts proof of concept. Argo CD reads only this repo.
+Deployment config for the Argo CD + Argo Rollouts + Kargo proof of concept. Argo CD reads only this repo.
 Each service's code and CI live in its own repo; all of them deploy through this one.
+
+> The version without Kargo (CI commits to test, Argo CD Notifications open prod PRs) is on the
+> [`argo-only`](https://github.com/vibrant-ethan-test-org/argo-poc-gitops/tree/argo-only) branch.
 
 Three local kind clusters:
 
 ```
- kind-argo-mgmt   Argo CD (one UI) + ApplicationSet + Notifications + Rollouts UI extension
+ kind-argo-mgmt   Argo CD (one UI) + ApplicationSet + Rollouts UI extension
+                  Kargo (promotion UI, Warehouses, Stages)
       │  Kubernetes API over the Docker "kind" network (https://argo-<env>-control-plane:6443)
       ├────────► kind-argo-test   Argo Rollouts + argo-poc-test, argo-poc-api-test
       └────────► kind-argo-prod   Argo Rollouts + argo-poc-prod, argo-poc-api-prod
 ```
 
-Argo CD reaches test and prod with an `argocd-manager` ServiceAccount in each, stored on argo-mgmt as
-cluster Secrets named `test` and `prod`. The ApplicationSet sends `overlays/<env>` to the cluster named `<env>`.
-Argo Rollouts and the e2e Jobs run in the cluster where the app runs.
+| UI | URL | Login |
+|---|---|---|
+| Argo CD | https://localhost:8443 | `admin` / `admin` |
+| Kargo | http://localhost:8444 | password `admin` |
 
-| Service | App repo | Test | Prod |
-|---|---|---|---|
-| `argo-poc` (web page) | [argo-poc-app](https://github.com/vibrant-ethan-test-org/argo-poc-app) | http://localhost:8081 | http://localhost:8091 |
-| `argo-poc-api` (JSON API) | [argo-poc-api](https://github.com/vibrant-ethan-test-org/argo-poc-api) | http://localhost:8181/api/info | http://localhost:8191/api/info |
+Both UIs listen on 127.0.0.1 only, so the fixed passwords are not reachable from your network.
+
+| Service | App repo | Kargo Project | Test | Prod |
+|---|---|---|---|---|
+| `argo-poc` (web page) | [argo-poc-app](https://github.com/vibrant-ethan-test-org/argo-poc-app) | `argo-poc` | http://localhost:8081 | http://localhost:8091 |
+| `argo-poc-api` (JSON API) | [argo-poc-api](https://github.com/vibrant-ethan-test-org/argo-poc-api) | `argo-poc-api` | http://localhost:8181/api/info | http://localhost:8191/api/info |
 
 Preview (green) URLs are the same ports + 1 (8082, 8092, 8182, 8192).
 
+## How a release flows
+
 ```
 push to an app repo's main
-  → its ci.yaml calls release.yaml here: build + push images to GHCR,
-    commit tags to apps/<service>/overlays/test
-  → Argo CD syncs <service>-test → Argo Rollouts: green up, e2e on preview, switch traffic
-  → Argo CD Notifications → repository_dispatch → on-deployed.yaml
-      → GitHub Deployment "test" on the app commit (in the service's own repo)
-      → PR "<service> prod: vX" updating apps/<service>/overlays/prod (with app changelog)
-  → merge PR → Argo CD syncs <service>-prod → blue-green + e2e again → Deployment "prod"
+  → its ci.yaml calls release.yaml here: build + push multi-arch images to GHCR as v0.1.<run>,
+    with the app commit as an image annotation. CI does nothing else.
+  → Kargo Warehouse sees the new tag (polls GHCR every 30s) → new Freight
+  → Stage test (auto-promotion): Kargo commits the tag + app-sha to apps/<service>/overlays/test on main,
+    pins Argo CD app <service>-test to that commit
+  → Argo CD syncs → Argo Rollouts: green up, e2e on preview, switch traffic
+  → Kargo sees the app Healthy at that commit → Freight "verified in test"
+  → Kargo UI: Promote the verified Freight to prod (button) → same steps for overlays/prod
 ```
 
-Services release independently. If e2e fails, Rollouts aborts, the old version keeps serving,
-the app goes Degraded, no notification fires and no prod PR is opened.
+Deploying is still a Git commit that Argo CD applies. Kargo decides **when** to write it (automatically for test,
+on the Promote button for prod) and only offers prod Freight that passed test. Commits are authored by `kargo`
+and say which Freight and who promoted it.
+
+If e2e fails, Rollouts aborts and the old version keeps serving. The app goes Degraded, the Kargo Stage goes
+Unhealthy, the Freight is never verified, and Kargo refuses to promote it to prod ("Freight is not available to
+this Stage"). Pushing a fix produces new Freight that auto-promotes to test and replaces it.
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `bootstrap/` | `kind-{mgmt,test,prod}.yaml`, `install.sh` (three clusters, Argo CD, Argo Rollouts, UI extension, cluster registration, root app) |
+| `bootstrap/` | `kind-{mgmt,test,prod}.yaml`, `install.sh` (three clusters, Argo CD, Argo Rollouts, UI extension, cert-manager, Kargo, cluster registration, root app), `kargo-values.yaml` |
 | `apps/<service>/base/` | Rollout (blue-green), `app-active` / `app-preview` Services, `e2e` AnalysisTemplate |
-| `apps/<service>/overlays/{test,prod}/` | Namespace, image tags, `argo-poc/app-sha`, NodePorts. CI and promotion change only these. |
-| `argocd/services-appset.yaml` | ApplicationSet: one app `<service>-<env>` per `apps/*/overlays/*` folder, deployed to cluster `<env>` |
-| `argocd/` (rest) | AppProject, `root` (app-of-apps), notifications config |
-| `services.yaml` | Service registry: app repo, main image, URLs |
-| `.github/workflows/release.yaml` | Shared CI called by every app repo: build, push, deploy to test |
-| `.github/workflows/on-deployed.yaml` | Records GitHub Deployments and opens prod promotion PRs |
+| `apps/<service>/overlays/{test,prod}/` | Namespace, image tags, `argo-poc/app-sha`, NodePorts. Only Kargo changes these. |
+| `argocd/services-appset.yaml` | ApplicationSet: one app `<service>-<env>` per `apps/*/overlays/*` folder, deployed to cluster `<env>`, authorized for Kargo Stage `<service>:<env>` |
+| `argocd/kargo.yaml` | Argo CD app that syncs `kargo/` |
+| `argocd/` (rest) | AppProject, `root` (app-of-apps) |
+| `kargo/<service>.yaml` | Kargo Project, auto-promotion policy for test, Warehouse, Stages `test` and `prod` |
+| `kargo/update-overlay-task.yaml` | The promotion steps every Stage runs: clone, set image tags + app-sha, commit, push, sync the Argo CD app |
+| `.github/workflows/release.yaml` | Shared CI called by every app repo: build and push images |
 
 ## Setup from scratch
 
-Prereqs: Docker Desktop, `brew install kind argocd kustomize argoproj/tap/kubectl-argo-rollouts`.
+Prereqs: Docker Desktop, `brew install kind argocd kustomize helm argoproj/tap/kubectl-argo-rollouts`.
 
-1. **Token:** a fine-grained PAT (owner `vibrant-ethan-test-org`; repos: this one and every app repo;
-   permissions Contents, Pull requests, Deployments: read and write) saved to `~/.config/argo-poc/token`
-   (`chmod 600`), and stored as secret `POC_PAT` in every repo:
-   ```sh
-   for r in argo-poc-gitops argo-poc-app argo-poc-api; do
-     tr -d '[:space:]' < ~/.config/argo-poc/token | gh secret set POC_PAT -R vibrant-ethan-test-org/$r
-   done
-   ```
-2. **Everything else:** `./bootstrap/install.sh` (about 2 minutes). It creates the three clusters, installs Argo CD
-   on argo-mgmt and Argo Rollouts on test and prod, registers test and prod with Argo CD, loads the token into
-   `argocd-notifications-secret`, and applies `argocd/root.yaml`. All apps then come from Git.
+1. **Token:** a fine-grained PAT (owner `vibrant-ethan-test-org`, repo `argo-poc-gitops`, Contents: read and write)
+   saved to `~/.config/argo-poc/token` (`chmod 600`). Kargo uses it to push promotions. App repos need no secrets.
+2. **Everything else:** `./bootstrap/install.sh` (2–3 minutes; longer the first time while images download).
+   It creates the three clusters, installs Argo CD on argo-mgmt and Argo Rollouts on test and prod, installs
+   cert-manager and Kargo, registers test and prod with Argo CD, stores the token as Kargo's git credential
+   (`kargo-shared-resources/gitops-repo`), and applies `argocd/root.yaml`. All apps and Kargo pipelines then
+   come from Git. Safe to re-run if a step times out.
 
-GHCR images must be public (Org settings → Packages must allow public packages), or the cluster needs a pull secret.
-
-Argo CD: https://localhost:8443, user `admin`, password `admin`. `install.sh` sets this fixed password so it
-survives rebuilds; the UI port listens on 127.0.0.1 only, so other machines on your network cannot reach it.
+GHCR images must be public (Org settings → Packages must allow public packages), or the clusters and Kargo
+need pull credentials.
 
 Watch a rollout: `kubectl argo rollouts --context kind-argo-test -n argo-poc-api-test get rollout app --watch`,
 or open the app in Argo CD, click the `app` Rollout, then the **Rollout** tab.
@@ -78,42 +88,53 @@ or open the app in Argo CD, click the `app` Rollout, then the **Rollout** tab.
 
 1. New app repo with a `ci.yaml` that calls
    `vibrant-ethan-test-org/argo-poc-gitops/.github/workflows/release.yaml@main` with its `service` name and `images`.
-   Set the `POC_PAT` secret on it and add the repo to the PAT.
-2. Here: `apps/<service>/base` and `overlays/{test,prod}` (unique NodePorts), an entry in `services.yaml`, and
-   port mappings in `bootstrap/kind-test.yaml` and `kind-prod.yaml` (needs a cluster rebuild).
-   The ApplicationSet creates `<service>-test` and `<service>-prod` automatically.
-3. After the first CI run, make the new GHCR package public, then set the prod overlay to the first tag.
+2. Here: `apps/<service>/base` and `overlays/{test,prod}` (unique NodePorts), port mappings in
+   `bootstrap/kind-test.yaml` and `kind-prod.yaml` (needs a cluster rebuild), and `kargo/<service>.yaml`
+   (copy one; set the image and `e2eImage`). The ApplicationSet creates `<service>-test` and `<service>-prod`.
+3. After the first CI run, make the new GHCR package public.
 
 ## Demos (verified)
 
 | Scenario | How | What happens |
 |---|---|---|
-| Happy path | Push an app change | Test goes blue-green, e2e passes, traffic switches; prod PR opens; merging deploys prod the same way |
-| Broken release | Push a change that breaks the page but not `/healthz` | e2e fails on preview, rollout aborted, test keeps the old version, no PR |
-| Independent services | Push to one app repo only | Only that service's test app changes and only its PR opens |
-| Rollback (GitOps) | `git revert` the prod promotion commit | Prod returns to the previous version through blue-green + e2e |
-| `kubectl argo rollouts undo` | Run it against prod | Argo CD self-heals the Rollout back to Git within seconds. With self-heal on, roll back in Git. |
+| Happy path | Push an app change | Kargo auto-promotes to test, blue-green + e2e pass, Freight verified; Promote in the Kargo UI deploys prod the same way |
+| Broken release | Push a change that breaks the page but not `/healthz` | e2e fails on preview, rollout aborted, test keeps the old version, Stage Unhealthy, Kargo will not promote it to prod |
+| Fix forward | Push the fix | New Freight auto-promotes to test and becomes verified |
+| Rollback | Kargo UI: promote an older verified Freight to prod | Kargo commits the old tag; blue-green + e2e as usual |
+| Independent services | Push to one app repo only | Only that service's Kargo Project gets new Freight |
+| `kubectl argo rollouts undo` | Run it against prod | Argo CD self-heals the Rollout back to Git within seconds. Roll back through Kargo instead. |
 | Self-heal | Scale the Rollout by hand | Argo CD restores `replicas: 2` within seconds |
-| Separate clusters | Release a change | Test's blue-green and e2e run on argo-test, prod's on argo-prod; Argo CD on argo-mgmt drives both |
-| Disaster recovery | Delete the clusters, run `./bootstrap/install.sh` | All three clusters and every service come back from Git in about 2 minutes |
+| Separate clusters | Release a change | Test's blue-green and e2e run on argo-test, prod's on argo-prod; Argo CD and Kargo on argo-mgmt drive both |
+| Disaster recovery | Delete the clusters, run `./bootstrap/install.sh` | Clusters, apps and Kargo pipelines come back from Git. Kargo's Freight history does not; it starts from the newest images. |
 
 ## Lessons from building it
 
-- **Notification race.** Right after a sync, Argo CD can still report the previous version's Healthy
-  status before Rollouts starts the new one. The `on-deployed` trigger therefore requires
-  `health.lastTransitionTime > operationState.finishedAt` (became Healthy after the sync).
-- **Once per sync, not per commit.** With one repo for many services, every commit changes the revision of
-  every app. The trigger uses `oncePer: operationState.syncResult.revision`, so it fires only for apps
-  that actually synced.
+- **Pin the app to Kargo's commit.** Kargo's health check needs the Argo CD app synced to exactly the commit it
+  pushed. All services share `main`, so another service's later commit would move the app's revision and make the
+  Stage look unhealthy. `argocd-update` therefore sets `targetRevision` to the commit, and the ApplicationSet
+  ignores `targetRevision` differences. A side effect: editing an overlay by hand on `main` does not deploy;
+  changes go through Kargo.
+- **Commit SHA for e2e.** Kargo reads OCI *annotations* on the image index, not image labels, so `release.yaml`
+  adds `index:org.opencontainers.image.revision`. The promotion copies it into `argo-poc/app-sha`.
+- **Readable tags.** Without an explicit image list, `kustomize-set-image` writes digests. The task names each
+  image with its tag.
+- **Pairing images.** The web app's main and e2e images come from one CI run; the Warehouse only creates
+  Freight when both tags match (`freightCreationCriteria`).
+- **Empty promotion variables count as missing.** The API passes its own image as `e2eImage`, and the task skips
+  the second image step when they are the same.
+- **No early "verified".** Kargo keeps the Stage Progressing while the Rollout runs and marks Freight verified
+  only after e2e passed and traffic switched, so the Rollouts e2e gate also gates prod.
+- **Promotion timeouts.** During a slow-network rebuild one `argocd-update` step timed out after 5 minutes
+  waiting for Argo CD to start the sync. Re-promoting the same Freight fixed it.
+- **Notification race (argo-only branch).** Argo CD can briefly report the previous version's Healthy status
+  right after a sync; the Notifications trigger had to require `health.lastTransitionTime > operationState.finishedAt`.
 - **Kustomize and Rollouts.** Kustomize does not know Rollout or AnalysisTemplate fields. `rollout-transform.yaml`
   (from Argo Rollouts) plus `images-transform.yaml` make name references, annotations and image tags work.
 - **First deploy skips e2e.** A Rollout's first version has nothing to compare against and goes live directly.
 - **Multi-arch images.** GitHub runners are amd64 and the kind node on Apple silicon is arm64, so CI builds both.
-- **Polling.** GitHub cannot reach a laptop, so Argo CD polls every 30s (`timeout.reconciliation`).
+- **Polling.** GitHub cannot reach a laptop, so Argo CD polls Git every 30s and Kargo polls GHCR every 30s.
 - **Cluster addresses.** `localhost` ports work from your Mac but not from pods. Argo CD reaches test and prod
   by their node names on the shared Docker network (`argo-test-control-plane:6443`), which are in the API certificates.
-- **Dropped events.** GitHub keeps one waiting run per concurrency group and cancels older ones, so
-  `on-deployed.yaml` uses one group per app.
 
 ## Teardown
 
