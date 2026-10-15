@@ -63,6 +63,10 @@ it names. Ways to hold (all verified):
 | Keep one build in test for manual testing | Kargo UI: drag that (older) build onto test → Promote. Kargo records a hold | Kargo: ⏸ on the Stage card; open the Stage for an **Auto-promotion paused** banner (who, when, which build) | **Resume** in that banner |
 | Stop auto-promotion into a Stage | Kargo UI: Project → Settings → ProjectConfig, `autoPromotionEnabled: false` | Hard to see: only the small ⚡ next to the Stage name disappears, and the editor hides `false` values | Set it back to `true` |
 
+Windows are per app, by exact name: `argo-poc-prod` currently has an **allow** window (weekdays 9:00–17:00
+America/New_York), so web-app prod deploys outside those hours wait; `argo-poc-api-prod` has none and deploys
+whenever its build passes test. Don't use `argo-poc-*` patterns: they also match `argo-poc-api-*`.
+
 During a deny window Kargo still commits the new tag to the prod overlay in Git; Argo CD applies it when the window
 ends. With `manualSync: true` a person's Promote in the Kargo UI syncs through the window; auto-promotions wait.
 Argo CD self-heal is also paused for prod while the window is active. The `argocd-update` step waits up to 72h
