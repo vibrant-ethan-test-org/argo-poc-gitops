@@ -59,7 +59,7 @@ it names. Ways to hold (all verified):
 
 | Goal | How | Visible where | Undo |
 |---|---|---|---|
-| Freeze prod (or set time windows) | Add an Argo CD deny sync window for `*-prod` in `argocd/project.yaml` (example in the file), or **Add Sync Window** in Argo CD → Settings → Projects → argo-poc | Argo CD prod app: **SYNC WINDOWS: SyncWindow**, "Sync operation blocked by sync window"; project page lists the window and its description. Kargo: prod shows **Promoting** / Unknown, the promotion waits on `argocd-update` with no reason given | Remove the window; the waiting promotion finishes within seconds |
+| Freeze prod (or set time windows) | Add an Argo CD deny sync window for `*-prod` in `argocd/project.yaml` (example in the file). Not in the Argo CD UI: the AppProject comes from Git with self-heal, so a UI-added window would be reverted | Argo CD prod app: **SYNC WINDOWS: SyncWindow**, "Sync operation blocked by sync window"; project page lists the window and its description. Kargo: prod shows **Promoting** / Unknown, the promotion waits on `argocd-update` with no reason given | Remove the window; the waiting promotion finishes within seconds |
 | Keep one build in test for manual testing | Kargo UI: drag that (older) build onto test → Promote. Kargo records a hold | Kargo: ⏸ on the Stage card; open the Stage for an **Auto-promotion paused** banner (who, when, which build) | **Resume** in that banner |
 | Stop auto-promotion into a Stage | Kargo UI: Project → Settings → ProjectConfig, `autoPromotionEnabled: false` | Hard to see: only the small ⚡ next to the Stage name disappears, and the editor hides `false` values | Set it back to `true` |
 
