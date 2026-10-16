@@ -1,4 +1,4 @@
-# Runs the e2e image against the preview Service before traffic switches.
+# Runs the service's e2e image against the preview Service before traffic switches.
 # A failed Job fails the analysis, which aborts the rollout and keeps the old version live.
 apiVersion: argoproj.io/v1alpha1
 kind: AnalysisTemplate
@@ -20,7 +20,7 @@ spec:
                 restartPolicy: Never
                 containers:
                   - name: e2e
-                    image: ghcr.io/vibrant-ethan-test-org/argo-poc-e2e # tag set by overlays
+                    image: e2e # renamed by the service's kustomization, tag set by its overlays
                     env:
                       - name: TARGET_URL
                         value: "{{args.target-url}}"

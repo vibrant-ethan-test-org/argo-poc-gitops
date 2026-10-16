@@ -34,7 +34,7 @@ Preview (green) URLs are the same ports + 1 (8082, 8092, 8182, 8192).
 
 ```
 push to an app repo's main
-  → its ci.yaml calls release.yaml here: build + push multi-arch images to GHCR as v0.1.<run>,
+  → its ci.yaml builds + pushes multi-arch images to GHCR as v0.2.<run> (e2e image first, same tag),
     with the app commit as an image annotation. CI does nothing else.
   → Kargo Warehouse sees the new tag (polls GHCR every 30s) → new Freight
   → Stage test (auto-promotion): Kargo commits the tag + app-sha to apps/<service>/overlays/test on main,
@@ -83,14 +83,15 @@ for a faster hotfix path. The ProjectConfig in Git only sets starting values; Ar
 | Path | What |
 |---|---|
 | `bootstrap/` | `kind-{mgmt,test,prod}.yaml`, `install.sh` (three clusters, Argo CD, Argo Rollouts, UI extension, cert-manager, Kargo, cluster registration, root app), `kargo-values.yaml` |
-| `apps/<service>/base/` | Rollout (blue-green), `app-active` / `app-preview` Services, `e2e` AnalysisTemplate |
+| `bases/bluegreen-service/` | Shared by every service: Rollout (blue-green), `app-active` / `app-preview` Services, `e2e` AnalysisTemplate, with placeholder images `app` and `e2e` |
+| `apps/<service>/base/` | One `kustomization.yaml`: points at the shared base and sets the service's name label and real image names (plus anything only this service needs, such as the API's `/e2e` command) |
 | `apps/<service>/overlays/{test,prod}/` | Namespace, image tags, `argo-poc/app-sha`, NodePorts. Only Kargo changes these. |
 | `argocd/services-appset.yaml` | ApplicationSet: one app `<service>-<env>` per `apps/*/overlays/*` folder, deployed to cluster `<env>`, authorized for Kargo Stage `<service>:<env>` |
 | `argocd/kargo.yaml` | Argo CD app that syncs `kargo/` |
 | `argocd/` (rest) | AppProject, `root` (app-of-apps) |
 | `kargo/<service>.yaml` | Kargo Project, starting auto-promotion switches, Warehouse, Stages `test` and `prod` (1-minute soak) |
 | `kargo/update-overlay-task.yaml` | The promotion steps every Stage runs: clone, set image tags + app-sha, commit, push, sync the Argo CD app |
-| `.github/workflows/release.yaml` | Shared CI called by every app repo: build and push images |
+| `.github/workflows/release.yaml` | Optional shared CI an app repo can call to build and push its images (the current app repos have their own `ci.yaml`) |
 
 ## Setup from scratch
 
@@ -112,9 +113,11 @@ or open the app in Argo CD, click the `app` Rollout, then the **Rollout** tab.
 
 ## Adding a service
 
-1. New app repo with a `ci.yaml` that calls
-   `vibrant-ethan-test-org/argo-poc-gitops/.github/workflows/release.yaml@main` with its `service` name and `images`.
-2. Here: `apps/<service>/base` and `overlays/{test,prod}` (unique NodePorts), port mappings in
+1. New app repo whose CI pushes SemVer tags (`vX.Y.Z`) to GHCR, with the e2e image under the same tag and the
+   `org.opencontainers.image.revision` index annotation (Kargo copies it to `argo-poc/app-sha`). It can call
+   `.github/workflows/release.yaml@main` here, or have its own `ci.yaml` like argo-poc-app and argo-poc-api.
+2. Here: `apps/<service>/base/kustomization.yaml` (copy one; set the label and image names; no Rollout to copy)
+   and `overlays/{test,prod}` (unique NodePorts), port mappings in
    `bootstrap/kind-test.yaml` and `kind-prod.yaml` (needs a cluster rebuild), and `kargo/<service>.yaml`
    (copy one; set the image and `e2eImage`). The ApplicationSet creates `<service>-test` and `<service>-prod`.
 3. After the first CI run, make the new GHCR package public.
@@ -143,7 +146,7 @@ or open the app in Argo CD, click the `app` Rollout, then the **Rollout** tab.
   Stage look unhealthy. `argocd-update` therefore sets `targetRevision` to the commit, and the ApplicationSet
   ignores `targetRevision` differences. A side effect: editing an overlay by hand on `main` does not deploy;
   changes go through Kargo.
-- **Commit SHA for e2e.** Kargo reads OCI *annotations* on the image index, not image labels, so `release.yaml`
+- **Commit SHA for e2e.** Kargo reads OCI *annotations* on the image index, not image labels, so app CI
   adds `index:org.opencontainers.image.revision`. The promotion copies it into `argo-poc/app-sha`.
 - **Readable tags.** Without an explicit image list, `kustomize-set-image` writes digests. The task names each
   image with its tag.

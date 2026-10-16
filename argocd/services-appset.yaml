@@ -30,8 +30,8 @@ spec:
       annotations:
         # Kargo Stage <service>:<env> may update this app.
         kargo.akuity.io/authorized-stage: '{{ index .path.segments 1 }}:{{ .path.basename }}'
-        # Only re-render when this service's folder (base + overlays) changes.
-        argocd.argoproj.io/manifest-generate-paths: ../..
+        # Only re-render when this service's folder (base + overlays) or the shared base changes.
+        argocd.argoproj.io/manifest-generate-paths: ../..;/bases/bluegreen-service
     spec:
       project: argo-poc
       source:

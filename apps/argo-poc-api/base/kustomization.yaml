@@ -1,9 +1,23 @@
+# argo-poc-api: the shared blue-green setup with this service's label and image.
+# Its e2e checks are /e2e inside the service image, so both names point at the same image.
+# The image tag is set per environment in overlays/<env> (by Kargo).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - rollout.yaml
-  - services.yaml
-  - analysis-e2e.yaml
-configurations:
-  - rollout-transform.yaml
-  - images-transform.yaml
+  - ../../../bases/bluegreen-service
+labels:
+  - pairs:
+      app.kubernetes.io/name: argo-poc-api
+    includeSelectors: true
+    includeTemplates: true
+images:
+  - name: app
+    newName: ghcr.io/vibrant-ethan-test-org/argo-poc-api
+  - name: e2e
+    newName: ghcr.io/vibrant-ethan-test-org/argo-poc-api
+patches:
+  - target: { kind: AnalysisTemplate, name: e2e }
+    patch: |-
+      - op: add
+        path: /spec/metrics/0/provider/job/spec/template/spec/containers/0/command
+        value: ["/e2e"]

@@ -9,16 +9,12 @@ spec:
   progressDeadlineSeconds: 180
   progressDeadlineAbort: true
   selector:
-    matchLabels:
-      app.kubernetes.io/name: argo-poc
+    matchLabels: {}   # the service's app.kubernetes.io/name label is added by its kustomization
   template:
-    metadata:
-      labels:
-        app.kubernetes.io/name: argo-poc
     spec:
       containers:
         - name: app
-          image: ghcr.io/vibrant-ethan-test-org/argo-poc-app # tag set by overlays
+          image: app # renamed by the service's kustomization, tag set by its overlays
           ports:
             - name: http
               containerPort: 8080

@@ -1,0 +1,12 @@
+# Shared blue-green setup used by every service: a Rollout, its active and preview Services, and the
+# e2e AnalysisTemplate that gates the traffic switch. Each service's base points at this folder and
+# sets only what differs: its name label and image names (see apps/<service>/base).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - rollout.yaml
+  - services.yaml
+  - analysis-e2e.yaml
+configurations:
+  - rollout-transform.yaml
+  - images-transform.yaml

@@ -1,9 +1,16 @@
+# argo-poc (web): the shared blue-green setup with this service's label and images.
+# The image tags are set per environment in overlays/<env> (by Kargo).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - rollout.yaml
-  - services.yaml
-  - analysis-e2e.yaml
-configurations:
-  - rollout-transform.yaml
-  - images-transform.yaml
+  - ../../../bases/bluegreen-service
+labels:
+  - pairs:
+      app.kubernetes.io/name: argo-poc
+    includeSelectors: true
+    includeTemplates: true
+images:
+  - name: app
+    newName: ghcr.io/vibrant-ethan-test-org/argo-poc-app
+  - name: e2e
+    newName: ghcr.io/vibrant-ethan-test-org/argo-poc-e2e
