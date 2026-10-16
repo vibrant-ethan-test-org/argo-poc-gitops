@@ -53,10 +53,7 @@ spec:
         path: ./repo
     # Pin the app to the pushed commit. All services share main, so without the pin another
     # service's later commit would move this app's revision and Kargo would call the Stage unhealthy.
-    # Waits out Argo CD deny sync windows (see argocd/project.yaml); the default timeout is 5m.
     - uses: argocd-update
-      retry:
-        timeout: 72h
       config:
         apps:
           - name: ${{ vars.service }}-${{ ctx.stage }}

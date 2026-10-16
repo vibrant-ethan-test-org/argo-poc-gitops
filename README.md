@@ -59,20 +59,13 @@ it names. Ways to hold (all verified):
 
 | Goal | How | Visible where | Undo |
 |---|---|---|---|
-| Freeze prod (or set time windows) | Add an Argo CD deny sync window for `*-prod` in `argocd/project.yaml` (example in the file). Not in the Argo CD UI: the AppProject comes from Git with self-heal, so a UI-added window would be reverted | Argo CD prod app: **SYNC WINDOWS: SyncWindow**, "Sync operation blocked by sync window"; project page lists the window and its description. Kargo: prod shows **Promoting** / Unknown, the promotion waits on `argocd-update` with no reason given | Remove the window; the waiting promotion finishes within seconds |
 | Keep one build in test for manual testing | Kargo UI: drag that (older) build onto test → Promote. Kargo records a hold | Kargo: ⏸ on the Stage card; open the Stage for an **Auto-promotion paused** banner (who, when, which build) | **Resume** in that banner |
-| Stop auto-promotion into a Stage | Kargo UI: Project → Settings → ProjectConfig, `autoPromotionEnabled: false` | Hard to see: only the small ⚡ next to the Stage name disappears, and the editor hides `false` values | Set it back to `true` |
+| Hold prod (or any Stage): no new builds go in | Kargo UI: Project → Settings → ProjectConfig, `autoPromotionEnabled: false` for that Stage | Hard to see: only the small ⚡ next to the Stage name disappears, and the editor hides `false` values | Set it back to `true` |
 
-Windows are per app, by exact name: `argo-poc-prod` currently has an **allow** window (weekdays 9:00–17:00
-America/New_York), so web-app prod deploys outside those hours wait; `argo-poc-api-prod` has none and deploys
-whenever its build passes test. Don't use `argo-poc-*` patterns: they also match `argo-poc-api-*`.
-
-During a deny window Kargo still commits the new tag to the prod overlay in Git; Argo CD applies it when the window
-ends. With `manualSync: true` a person's Promote in the Kargo UI syncs through the window; auto-promotions wait.
-Argo CD self-heal is also paused for prod while the window is active. The `argocd-update` step waits up to 72h
-(`kargo/update-overlay-task.yaml`), so a window longer than that would fail the promotion. Kargo's built-in hold
-cannot freeze prod at its current build (it only holds when you promote something other than the newest build),
-which is why freezes use sync windows.
+Kargo's built-in hold cannot freeze prod at its current build (it only holds when you promote something other
+than the newest build), so prod holds use the ProjectConfig switch. A manual Promote still works while a Stage is
+held. Argo CD sync windows are deliberately not used: Kargo would still commit to Git and then show the promotion
+as Running with no reason, which is confusing.
 
 The 1-minute soak applies to manual promotion to prod too; lower `requiredSoakTime` in `kargo/<service>.yaml`
 for a faster hotfix path. The ProjectConfig in Git only sets starting values; Argo CD ignores later changes to
@@ -127,8 +120,6 @@ or open the app in Argo CD, click the `app` Rollout, then the **Rollout** tab.
 | Scenario | How | What happens |
 |---|---|---|
 | Happy path | Push an app change | Kargo auto-promotes to test, blue-green + e2e pass, Freight verified; 1 minute later prod auto-promotes the same way |
-| Freeze prod | Deny sync window on `*-prod`, then push a change | Test gets it; Kargo commits to prod and waits; Argo CD shows "blocked by sync window"; removing the window deploys it |
-| Promote during a freeze | Kargo UI Promote with `manualSync: true` | The manual sync (by `admin`) goes through the window |
 | Hold test | Promote an older build to test in the UI | Kargo records a hold; new builds wait until **Resume** |
 | Broken release | Push a change that breaks the page but not `/healthz` | e2e fails on preview, rollout aborted, test keeps the old version, Stage Unhealthy, Kargo will not promote it to prod |
 | Fix forward | Push the fix | New Freight auto-promotes to test and becomes verified |
