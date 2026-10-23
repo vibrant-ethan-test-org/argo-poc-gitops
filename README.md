@@ -44,7 +44,7 @@ the app goes Degraded, no notification fires and no prod PR is opened.
 | `bootstrap/` | `kind-{mgmt,test,prod}.yaml`, `install.sh` (three clusters, Argo CD, Argo Rollouts, UI extension, cluster registration, root app) |
 | `apps/<service>/base/` | Rollout (blue-green), `app-active` / `app-preview` Services, `e2e` AnalysisTemplate |
 | `apps/<service>/overlays/{test,prod}/` | Namespace, image tags, `argo-poc/app-sha`, NodePorts. CI and promotion change only these. |
-| `argocd/services-appset.yaml` | ApplicationSet: one app `<service>-<env>` per `apps/*/overlays/*` folder, deployed to cluster `<env>` |
+| `argocd/services-appset.yaml` | ApplicationSet: one app `<service>-<env>` per `apps/*/overlays/*` folder, deployed to cluster `<env>`. It never deletes apps or their workloads, and root never prunes it (see the comments in the file). |
 | `argocd/` (rest) | AppProject, `root` (app-of-apps), notifications config |
 | `services.yaml` | Service registry: app repo, main image, URLs |
 | `.github/workflows/release.yaml` | Shared CI called by every app repo: build, push, deploy to test |
@@ -83,6 +83,11 @@ or open the app in Argo CD, click the `app` Rollout, then the **Rollout** tab.
    port mappings in `bootstrap/kind-test.yaml` and `kind-prod.yaml` (needs a cluster rebuild).
    The ApplicationSet creates `<service>-test` and `<service>-prod` automatically.
 3. After the first CI run, make the new GHCR package public, then set the prod overlay to the first tag.
+
+Removing a service: delete its `apps/<service>` folder, then delete the apps with
+`argocd app delete <service>-test <service>-prod`. The ApplicationSet does not delete apps itself, and deleting
+an app leaves its workloads running (`preserveResourcesOnDeletion`); delete the `<service>-<env>` namespaces to
+remove them.
 
 ## Demos (verified)
 

@@ -26,7 +26,11 @@ mgmt apply -n argocd --server-side --force-conflicts \
 mgmt -n argocd patch configmap argocd-cm --type merge -p '{"data":{"timeout.reconciliation":"30s"}}'
 # Expose the UI on https://localhost:8443 via the kind port mapping.
 mgmt -n argocd patch svc argocd-server -p '{"spec":{"type":"NodePort","ports":[{"port":443,"nodePort":30443}]}}'
+# Let an ApplicationSet set its own applicationsSync policy (services uses create-update: never delete apps).
+mgmt -n argocd patch configmap argocd-cmd-params-cm --type merge \
+  -p '{"data":{"applicationsetcontroller.enable.policy.override":"true"}}'
 mgmt -n argocd rollout restart statefulset/argocd-application-controller
+mgmt -n argocd rollout restart deployment/argocd-applicationset-controller
 # Argo Rollouts UI extension (Rollout tab in the Argo CD UI).
 mgmt -n argocd patch deployment argocd-server --patch-file "$DIR/argocd-rollout-extension.yaml"
 

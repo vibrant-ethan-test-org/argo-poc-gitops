@@ -3,12 +3,24 @@
 #                                      namespace <service>-<env> on the cluster named <env>
 # Clusters "test" and "prod" are registered by bootstrap/install.sh.
 # Adding a service is just adding a folder; adding an environment also needs a cluster with that name.
+#
+# Guards against a bad edit to this file (e.g. a glob that stops matching) wiping the apps:
+# - Prune=false: root never deletes this ApplicationSet, even if the file is removed or renamed.
+# - applicationsSync create-update: this ApplicationSet creates and updates apps but never deletes
+#   them, so removing a service is deliberate (delete the folder, then delete the app by hand).
+#   Needs applicationsetcontroller.enable.policy.override=true (set in bootstrap/install.sh).
+# - preserveResourcesOnDeletion: deleting an app leaves its Rollout and Services running.
 apiVersion: argoproj.io/v1alpha1
 kind: ApplicationSet
 metadata:
   name: services
   namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false
 spec:
+  syncPolicy:
+    applicationsSync: create-update
+    preserveResourcesOnDeletion: true
   goTemplate: true
   goTemplateOptions: ["missingkey=error"]
   generators:
